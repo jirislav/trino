@@ -100,6 +100,14 @@ public class OptimizerConfig
     private DataSize minInputSizePerTask = DataSize.of(5, GIGABYTE);
     private long minInputRowsPerTask = 10_000_000L;
 
+    // ASOF join optimization
+    private boolean asofJoinUsePositionTrackingEnabled = true;
+    private boolean asofJoinUseBinarySearchEnabled = true;
+    private boolean asofJoinEarlyTerminationEnabled = true;
+    private AsofJoinStrategy asofJoinStrategy = AsofJoinStrategy.AUTOMATIC;
+    private long asofJoinWindowingThresholdRows = 1_000_000L;
+    private DataSize asofJoinWindowingThresholdSize = DataSize.of(100, MEGABYTE);
+
     private boolean allowUnsafePushdown; // TODO: remove once https://github.com/trinodb/trino/issues/22268 is fixed
 
     public enum JoinReorderingStrategy
@@ -140,6 +148,13 @@ public class OptimizerConfig
         PRE_AGGREGATE,
         SPLIT_TO_SUBQUERIES,
         AUTOMATIC,
+    }
+
+    public enum AsofJoinStrategy
+    {
+        AUTOMATIC,  // Let the optimizer choose based on cost
+        WINDOWING,  // Force windowing strategy (LEFT JOIN + ROW_NUMBER)
+        SORT_MERGE  // Force sort-merge strategy
     }
 
     public double getCpuCostWeight()
@@ -821,6 +836,86 @@ public class OptimizerConfig
     public OptimizerConfig setUnsafePushdownAllowed(boolean value)
     {
         this.allowUnsafePushdown = value;
+        return this;
+    }
+
+    public boolean isAsofJoinUsePositionTrackingEnabled()
+    {
+        return asofJoinUsePositionTrackingEnabled;
+    }
+
+    @Config("optimizer.asof-join-use-position-tracking")
+    @ConfigDescription("Enable position tracking optimization for ASOF joins")
+    public OptimizerConfig setAsofJoinUsePositionTrackingEnabled(boolean asofJoinUsePositionTrackingEnabled)
+    {
+        this.asofJoinUsePositionTrackingEnabled = asofJoinUsePositionTrackingEnabled;
+        return this;
+    }
+
+    public boolean isAsofJoinUseBinarySearchEnabled()
+    {
+        return asofJoinUseBinarySearchEnabled;
+    }
+
+    @Config("optimizer.asof-join-use-binary-search")
+    @ConfigDescription("Enable binary search optimization for ASOF joins")
+    public OptimizerConfig setAsofJoinUseBinarySearchEnabled(boolean asofJoinUseBinarySearchEnabled)
+    {
+        this.asofJoinUseBinarySearchEnabled = asofJoinUseBinarySearchEnabled;
+        return this;
+    }
+
+    public boolean isAsofJoinEarlyTerminationEnabled()
+    {
+        return asofJoinEarlyTerminationEnabled;
+    }
+
+    @Config("optimizer.asof-join-early-termination")
+    @ConfigDescription("Enable early termination optimization for ASOF joins")
+    public OptimizerConfig setAsofJoinEarlyTerminationEnabled(boolean asofJoinEarlyTerminationEnabled)
+    {
+        this.asofJoinEarlyTerminationEnabled = asofJoinEarlyTerminationEnabled;
+        return this;
+    }
+
+    public AsofJoinStrategy getAsofJoinStrategy()
+    {
+        return asofJoinStrategy;
+    }
+
+    @Config("optimizer.asof-join-strategy")
+    @ConfigDescription("Strategy to use for ASOF joins: AUTOMATIC (cost-based), WINDOWING, or SORT_MERGE")
+    public OptimizerConfig setAsofJoinStrategy(AsofJoinStrategy asofJoinStrategy)
+    {
+        this.asofJoinStrategy = requireNonNull(asofJoinStrategy, "asofJoinStrategy is null");
+        return this;
+    }
+
+    @Min(0)
+    public long getAsofJoinWindowingThresholdRows()
+    {
+        return asofJoinWindowingThresholdRows;
+    }
+
+    @Config("optimizer.asof-join-windowing-threshold-rows")
+    @ConfigDescription("Maximum build side row count for using windowing ASOF join strategy")
+    public OptimizerConfig setAsofJoinWindowingThresholdRows(long asofJoinWindowingThresholdRows)
+    {
+        this.asofJoinWindowingThresholdRows = asofJoinWindowingThresholdRows;
+        return this;
+    }
+
+    @NotNull
+    public DataSize getAsofJoinWindowingThresholdSize()
+    {
+        return asofJoinWindowingThresholdSize;
+    }
+
+    @Config("optimizer.asof-join-windowing-threshold-size")
+    @ConfigDescription("Maximum build side data size for using windowing ASOF join strategy")
+    public OptimizerConfig setAsofJoinWindowingThresholdSize(DataSize asofJoinWindowingThresholdSize)
+    {
+        this.asofJoinWindowingThresholdSize = asofJoinWindowingThresholdSize;
         return this;
     }
 }

@@ -110,6 +110,7 @@ import io.trino.sql.planner.plan.SampleNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SimpleTableExecuteNode;
 import io.trino.sql.planner.plan.SkipToPosition;
+import io.trino.sql.planner.plan.SortMergeAsofJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
 import io.trino.sql.planner.plan.StatisticAggregations;
@@ -746,6 +747,32 @@ public class PlanPrinter
                     context);
 
             nodeOutput.appendDetails("Distribution: %s", node.getDistributionType());
+            node.getLeft().accept(this, new Context(context.isInitialPlan()));
+            node.getRight().accept(this, new Context(context.isInitialPlan()));
+
+            return null;
+        }
+
+        @Override
+        public Void visitAsofJoin(SortMergeAsofJoinNode node, Context context)
+        {
+            List<Expression> criteriaExpressions = node.getCriteria().stream()
+                    .map(JoinNode.EquiJoinClause::toExpression)
+                    .collect(toImmutableList());
+
+            ImmutableMap.Builder<String, String> descriptor = ImmutableMap.<String, String>builder()
+                    .put("criteria", Joiner.on(" AND ").join(anonymizeExpressions(criteriaExpressions)))
+                    .put("inequality", format("%s %s %s",
+                            anonymizer.anonymize(node.getLeftOrderingSymbol()),
+                            node.getInequalityOperator(),
+                            anonymizer.anonymize(node.getRightOrderingSymbol())));
+
+            addNode(
+                    node,
+                    "SortMergeAsofJoin",
+                    descriptor.buildOrThrow(),
+                    context);
+
             node.getLeft().accept(this, new Context(context.isInitialPlan()));
             node.getRight().accept(this, new Context(context.isInitialPlan()));
 

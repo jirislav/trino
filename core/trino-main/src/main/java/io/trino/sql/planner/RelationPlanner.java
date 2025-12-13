@@ -1166,7 +1166,7 @@ class RelationPlanner
         // For ASOF joins, create an inequality filter for the last column: right.ts <= left.ts
         Optional<Expression> filter = Optional.empty();
         if (isAsofJoin) {
-            Identifier lastColumn = joinColumns.get(joinColumns.size() - 1);
+            Identifier lastColumn = joinColumns.getLast();
             Symbol leftTs = leftJoinColumns.get(lastColumn);
             Symbol rightTs = rightJoinColumns.get(lastColumn);
             filter = Optional.of(new Comparison(LESS_THAN_OR_EQUAL, rightTs.toSymbolReference(), leftTs.toSymbolReference()));

@@ -74,6 +74,7 @@ import io.trino.sql.planner.plan.RefreshMaterializedViewNode;
 import io.trino.sql.planner.plan.RowNumberNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SimpleTableExecuteNode;
+import io.trino.sql.planner.plan.SortMergeAsofJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
 import io.trino.sql.planner.plan.StatisticsWriterNode;
@@ -1099,6 +1100,51 @@ public class AddExchanges
                 right = withDerivedProperties(
                         partitionedExchange(idAllocator.getNextId(), REMOTE, right.getNode(), ImmutableList.of(node.getRightPartitionSymbol().get())),
                         right.getProperties());
+            }
+
+            PlanNode newJoinNode = node.replaceChildren(ImmutableList.of(left.getNode(), right.getNode()));
+            return new PlanWithProperties(newJoinNode, deriveProperties(newJoinNode, ImmutableList.of(left.getProperties(), right.getProperties())));
+        }
+
+        @Override
+        public PlanWithProperties visitAsofJoin(SortMergeAsofJoinNode node, PreferredProperties preferredProperties)
+        {
+            // Process children
+            PlanWithProperties left = node.getLeft().accept(this, PreferredProperties.any());
+            PlanWithProperties right = node.getRight().accept(this, PreferredProperties.any());
+
+            // For sort-merge ASOF join with equi-keys, partition both sides by equi-keys
+            // This enables distributed processing where each worker handles different equi-key groups
+            // For ASOF joins without equi-keys, gather to single node (fallback to original behavior)
+            if (!node.getCriteria().isEmpty()) {
+                // Distributed mode: partition both sides by equi-keys
+                List<Symbol> leftEquiSymbols = node.getCriteria().stream()
+                        .map(JoinNode.EquiJoinClause::getLeft)
+                        .collect(toImmutableList());
+                List<Symbol> rightEquiSymbols = node.getCriteria().stream()
+                        .map(JoinNode.EquiJoinClause::getRight)
+                        .collect(toImmutableList());
+
+                // Add exchanges to partition by equi-keys if needed
+                if (!left.getProperties().isNodePartitionedOn(leftEquiSymbols, false, isUseExactPartitioning(session)) || left.getProperties().isSingleNode()) {
+                    left = withDerivedProperties(
+                            partitionedExchange(idAllocator.getNextId(), REMOTE, left.getNode(), leftEquiSymbols),
+                            left.getProperties());
+                }
+
+                if (!right.getProperties().isNodePartitionedOn(rightEquiSymbols, false, isUseExactPartitioning(session)) || right.getProperties().isSingleNode()) {
+                    right = withDerivedProperties(
+                            partitionedExchange(idAllocator.getNextId(), REMOTE, right.getNode(), rightEquiSymbols),
+                            right.getProperties());
+                }
+            }
+            else {
+                // Fallback: No equi-keys, gather build side to single node
+                if (!right.getProperties().isSingleNode()) {
+                    right = withDerivedProperties(
+                            gatheringExchange(idAllocator.getNextId(), REMOTE, right.getNode()),
+                            right.getProperties());
+                }
             }
 
             PlanNode newJoinNode = node.replaceChildren(ImmutableList.of(left.getNode(), right.getNode()));

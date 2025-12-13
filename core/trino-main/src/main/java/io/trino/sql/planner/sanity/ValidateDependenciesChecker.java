@@ -58,6 +58,7 @@ import io.trino.sql.planner.plan.SampleNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SetOperationNode;
 import io.trino.sql.planner.plan.SimpleTableExecuteNode;
+import io.trino.sql.planner.plan.SortMergeAsofJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
 import io.trino.sql.planner.plan.StatisticAggregationsDescriptor;
@@ -626,6 +627,39 @@ public final class ValidateDependenciesChecker
                     allInputs);
 
             checkLeftOutputSymbolsBeforeRight(node.getLeft().getOutputSymbols(), node.getOutputSymbols());
+            return null;
+        }
+
+        @Override
+        public Void visitAsofJoin(SortMergeAsofJoinNode node, Set<Symbol> boundSymbols)
+        {
+            node.getLeft().accept(this, boundSymbols);
+            node.getRight().accept(this, boundSymbols);
+
+            Set<Symbol> leftInputs = createInputs(node.getLeft(), boundSymbols);
+            Set<Symbol> rightInputs = createInputs(node.getRight(), boundSymbols);
+
+            // Validate equi-join criteria
+            for (JoinNode.EquiJoinClause clause : node.getCriteria()) {
+                checkArgument(leftInputs.contains(clause.getLeft()),
+                        "Symbol from join clause (%s) not in left source (%s)",
+                        clause.getLeft(), node.getLeft().getOutputSymbols());
+                checkArgument(rightInputs.contains(clause.getRight()),
+                        "Symbol from join clause (%s) not in right source (%s)",
+                        clause.getRight(), node.getRight().getOutputSymbols());
+            }
+
+            // Validate ordering symbols
+            checkArgument(leftInputs.contains(node.getLeftOrderingSymbol()),
+                    "Left ordering symbol (%s) not in left source (%s)",
+                    node.getLeftOrderingSymbol(), node.getLeft().getOutputSymbols());
+            checkArgument(rightInputs.contains(node.getRightOrderingSymbol()),
+                    "Right ordering symbol (%s) not in right source (%s)",
+                    node.getRightOrderingSymbol(), node.getRight().getOutputSymbols());
+
+            // Check that left output symbols come before right output symbols
+            checkLeftOutputSymbolsBeforeRight(node.getLeft().getOutputSymbols(), node.getOutputSymbols());
+
             return null;
         }
 

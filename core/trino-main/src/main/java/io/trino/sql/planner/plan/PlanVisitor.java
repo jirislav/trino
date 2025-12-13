@@ -109,6 +109,11 @@ public abstract class PlanVisitor<R, C>
         return visitPlan(node, context);
     }
 
+    public R visitAsofJoin(SortMergeAsofJoinNode node, C context)
+    {
+        return visitPlan(node, context);
+    }
+
     public R visitIndexJoin(IndexJoinNode node, C context)
     {
         return visitPlan(node, context);

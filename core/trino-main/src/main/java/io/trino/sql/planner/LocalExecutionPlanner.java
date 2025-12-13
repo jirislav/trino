@@ -84,6 +84,7 @@ import io.trino.operator.ScanFilterAndProjectOperator.ScanFilterAndProjectOperat
 import io.trino.operator.SetBuilderOperator.SetBuilderOperatorFactory;
 import io.trino.operator.SetBuilderOperator.SetSupplier;
 import io.trino.operator.SimpleTableExecuteOperator.SimpleTableExecuteOperatorOperatorFactory;
+import io.trino.operator.SortMergeAsofJoinOperator.SortMergeAsofJoinOperatorFactory;
 import io.trino.operator.SourceOperatorFactory;
 import io.trino.operator.SpatialIndexBuilderOperator.SpatialIndexBuilderOperatorFactory;
 import io.trino.operator.SpatialIndexBuilderOperator.SpatialPredicate;
@@ -126,6 +127,9 @@ import io.trino.operator.join.LookupSourceFactory;
 import io.trino.operator.join.NestedLoopJoinBridge;
 import io.trino.operator.join.NestedLoopJoinPagesSupplier;
 import io.trino.operator.join.PartitionedLookupSourceFactory;
+import io.trino.operator.join.SortMergeAsofJoinBridge;
+import io.trino.operator.join.SortMergeAsofJoinBuildOperator.SortMergeAsofJoinBuildOperatorFactory;
+import io.trino.operator.join.SortMergeAsofJoinPagesSupplier;
 import io.trino.operator.join.unspilled.HashBuilderOperator;
 import io.trino.operator.output.PartitionedOutputOperator.PartitionedOutputFactory;
 import io.trino.operator.output.PositionsAppenderFactory;
@@ -241,6 +245,7 @@ import io.trino.sql.planner.plan.RowNumberNode;
 import io.trino.sql.planner.plan.SampleNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SimpleTableExecuteNode;
+import io.trino.sql.planner.plan.SortMergeAsofJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
 import io.trino.sql.planner.plan.StatisticAggregationsDescriptor;
@@ -2596,6 +2601,72 @@ public class LocalExecutionPlanner
             }
 
             throw new VerifyException("No valid spatial relationship found for spatial join");
+        }
+
+        @Override
+        public PhysicalOperation visitAsofJoin(SortMergeAsofJoinNode node, LocalExecutionPlanContext context)
+        {
+            // Plan probe (left) side
+            PhysicalOperation probeSource = node.getLeft().accept(this, context);
+
+            // Plan build (right) side in separate context
+            LocalExecutionPlanContext buildContext = context.createSubContext();
+            PhysicalOperation buildSource = node.getRight().accept(this, buildContext);
+
+            // Create bridge for coordinating build and probe
+            JoinBridgeManager<SortMergeAsofJoinBridge> joinBridgeManager = new JoinBridgeManager<>(
+                    false,
+                    new SortMergeAsofJoinPagesSupplier(),
+                    buildSource.getTypes());
+
+            // Create build operator factory
+            SortMergeAsofJoinBuildOperatorFactory buildOperatorFactory = new SortMergeAsofJoinBuildOperatorFactory(
+                    buildContext.getNextOperatorId(),
+                    node.getId(),
+                    joinBridgeManager);
+
+            // Add build pipeline
+            context.addDriverFactory(
+                    false,
+                    new PhysicalOperation(buildOperatorFactory, buildSource),
+                    buildContext);
+
+            // Get probe and build channel mappings
+            List<Integer> probeEquiChannels = node.getCriteria().stream()
+                    .map(JoinNode.EquiJoinClause::getLeft)
+                    .map(symbol -> probeSource.getLayout().get(symbol))
+                    .collect(toImmutableList());
+
+            List<Integer> buildEquiChannels = node.getCriteria().stream()
+                    .map(JoinNode.EquiJoinClause::getRight)
+                    .map(symbol -> buildSource.getLayout().get(symbol))
+                    .collect(toImmutableList());
+
+            int probeOrderingChannel = probeSource.getLayout().get(node.getLeftOrderingSymbol());
+            int buildOrderingChannel = buildSource.getLayout().get(node.getRightOrderingSymbol());
+
+            // Create probe operator factory
+            SortMergeAsofJoinOperatorFactory probeOperatorFactory = new SortMergeAsofJoinOperatorFactory(
+                    context.getNextOperatorId(),
+                    node.getId(),
+                    joinBridgeManager,
+                    probeSource.getTypes(),
+                    buildSource.getTypes(),
+                    probeEquiChannels,
+                    buildEquiChannels,
+                    probeOrderingChannel,
+                    buildOrderingChannel,
+                    node.getInequalityOperator(),
+                    blockTypeOperators);
+
+            // Build output mappings
+            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            List<Symbol> outputSymbols = node.getOutputSymbols();
+            for (int i = 0; i < outputSymbols.size(); i++) {
+                outputMappings.put(outputSymbols.get(i), i);
+            }
+
+            return new PhysicalOperation(probeOperatorFactory, outputMappings.buildOrThrow(), probeSource);
         }
 
         private Optional<PhysicalOperation> tryCreateSpatialJoin(

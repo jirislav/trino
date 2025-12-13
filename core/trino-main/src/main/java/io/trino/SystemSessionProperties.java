@@ -107,6 +107,12 @@ public final class SystemSessionProperties
     public static final String SPILL_ENABLED = "spill_enabled";
     public static final String AGGREGATION_OPERATOR_UNSPILL_MEMORY_LIMIT = "aggregation_operator_unspill_memory_limit";
     public static final String ITERATIVE_OPTIMIZER_TIMEOUT = "iterative_optimizer_timeout";
+    public static final String ASOF_JOIN_USE_POSITION_TRACKING = "asof_join_use_position_tracking";
+    public static final String ASOF_JOIN_USE_BINARY_SEARCH = "asof_join_use_binary_search";
+    public static final String ASOF_JOIN_EARLY_TERMINATION = "asof_join_early_termination";
+    public static final String ASOF_JOIN_STRATEGY = "asof_join_strategy";
+    public static final String ASOF_JOIN_WINDOWING_THRESHOLD_ROWS = "asof_join_windowing_threshold_rows";
+    public static final String ASOF_JOIN_WINDOWING_THRESHOLD_SIZE = "asof_join_windowing_threshold_size";
     public static final String ENABLE_FORCED_EXCHANGE_BELOW_GROUP_ID = "enable_forced_exchange_below_group_id";
     public static final String EXCHANGE_COMPRESSION_CODEC = "exchange_compression_codec";
     public static final String ENABLE_INTERMEDIATE_AGGREGATIONS = "enable_intermediate_aggregations";
@@ -502,6 +508,37 @@ public final class SystemSessionProperties
                         ITERATIVE_OPTIMIZER_TIMEOUT,
                         "Timeout for plan optimization in iterative optimizer",
                         optimizerConfig.getIterativeOptimizerTimeout(),
+                        false),
+                booleanProperty(
+                        ASOF_JOIN_USE_POSITION_TRACKING,
+                        "Enable position tracking optimization for ASOF joins",
+                        optimizerConfig.isAsofJoinUsePositionTrackingEnabled(),
+                        false),
+                booleanProperty(
+                        ASOF_JOIN_USE_BINARY_SEARCH,
+                        "Enable binary search optimization for ASOF joins",
+                        optimizerConfig.isAsofJoinUseBinarySearchEnabled(),
+                        false),
+                booleanProperty(
+                        ASOF_JOIN_EARLY_TERMINATION,
+                        "Enable early termination optimization for ASOF joins",
+                        optimizerConfig.isAsofJoinEarlyTerminationEnabled(),
+                        false),
+                enumProperty(
+                        ASOF_JOIN_STRATEGY,
+                        "Strategy to use for ASOF joins: AUTOMATIC (cost-based), WINDOWING, or SORT_MERGE",
+                        OptimizerConfig.AsofJoinStrategy.class,
+                        optimizerConfig.getAsofJoinStrategy(),
+                        false),
+                longProperty(
+                        ASOF_JOIN_WINDOWING_THRESHOLD_ROWS,
+                        "Maximum build side row count for using windowing ASOF join strategy",
+                        optimizerConfig.getAsofJoinWindowingThresholdRows(),
+                        false),
+                dataSizeProperty(
+                        ASOF_JOIN_WINDOWING_THRESHOLD_SIZE,
+                        "Maximum build side data size for using windowing ASOF join strategy",
+                        optimizerConfig.getAsofJoinWindowingThresholdSize(),
                         false),
                 booleanProperty(
                         ENABLE_FORCED_EXCHANGE_BELOW_GROUP_ID,
@@ -2045,5 +2082,35 @@ public final class SystemSessionProperties
     public static boolean isSpoolingUnsupportedWarningEnabled(Session session)
     {
         return session.getSystemProperty(SPOOLING_UNSUPPORTED_WARNING, Boolean.class);
+    }
+
+    public static boolean isAsofJoinUsePositionTrackingEnabled(Session session)
+    {
+        return session.getSystemProperty(ASOF_JOIN_USE_POSITION_TRACKING, Boolean.class);
+    }
+
+    public static boolean isAsofJoinUseBinarySearchEnabled(Session session)
+    {
+        return session.getSystemProperty(ASOF_JOIN_USE_BINARY_SEARCH, Boolean.class);
+    }
+
+    public static boolean isAsofJoinEarlyTerminationEnabled(Session session)
+    {
+        return session.getSystemProperty(ASOF_JOIN_EARLY_TERMINATION, Boolean.class);
+    }
+
+    public static OptimizerConfig.AsofJoinStrategy getAsofJoinStrategy(Session session)
+    {
+        return session.getSystemProperty(ASOF_JOIN_STRATEGY, OptimizerConfig.AsofJoinStrategy.class);
+    }
+
+    public static long getAsofJoinWindowingThresholdRows(Session session)
+    {
+        return session.getSystemProperty(ASOF_JOIN_WINDOWING_THRESHOLD_ROWS, Long.class);
+    }
+
+    public static DataSize getAsofJoinWindowingThresholdSize(Session session)
+    {
+        return session.getSystemProperty(ASOF_JOIN_WINDOWING_THRESHOLD_SIZE, DataSize.class);
     }
 }

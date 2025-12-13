@@ -67,6 +67,7 @@ import io.trino.sql.planner.plan.SampleNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SimplePlanRewriter;
 import io.trino.sql.planner.plan.SimpleTableExecuteNode;
+import io.trino.sql.planner.plan.SortMergeAsofJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
 import io.trino.sql.planner.plan.StatisticsWriterNode;
@@ -1191,6 +1192,46 @@ public class UnaliasSymbolReferences
 
             return new PlanAndMappings(
                     new SpatialJoinNode(node.getId(), node.getType(), rewrittenLeft.getRoot(), rewrittenRight.getRoot(), newOutputSymbols, newFilter, newLeftPartitionSymbol, newRightPartitionSymbol, node.getKdbTree()),
+                    outputMapping);
+        }
+
+        @Override
+        public PlanAndMappings visitAsofJoin(SortMergeAsofJoinNode node, UnaliasContext context)
+        {
+            // it is assumed that symbols are distinct between left and right ASOF join source. Only symbols from outer correlation might be the exception
+            PlanAndMappings rewrittenLeft = node.getLeft().accept(this, context);
+            PlanAndMappings rewrittenRight = node.getRight().accept(this, context);
+
+            Map<Symbol, Symbol> outputMapping = new HashMap<>();
+            outputMapping.putAll(rewrittenLeft.getMappings());
+            outputMapping.putAll(rewrittenRight.getMappings());
+
+            SymbolMapper mapper = symbolMapper(outputMapping);
+
+            // Map equi-join criteria
+            ImmutableList.Builder<JoinNode.EquiJoinClause> builder = ImmutableList.builder();
+            for (JoinNode.EquiJoinClause clause : node.getCriteria()) {
+                builder.add(new JoinNode.EquiJoinClause(mapper.map(clause.getLeft()), mapper.map(clause.getRight())));
+            }
+            List<JoinNode.EquiJoinClause> newCriteria = builder.build();
+
+            // Map ordering symbols
+            Symbol newLeftOrderingSymbol = mapper.map(node.getLeftOrderingSymbol());
+            Symbol newRightOrderingSymbol = mapper.map(node.getRightOrderingSymbol());
+
+            // Map output symbols
+            List<Symbol> newOutputSymbols = mapper.mapAndDistinct(node.getOutputSymbols());
+
+            return new PlanAndMappings(
+                    new SortMergeAsofJoinNode(
+                            node.getId(),
+                            rewrittenLeft.getRoot(),
+                            rewrittenRight.getRoot(),
+                            newOutputSymbols,
+                            newCriteria,
+                            newLeftOrderingSymbol,
+                            newRightOrderingSymbol,
+                            node.getInequalityOperator()),
                     outputMapping);
         }
 

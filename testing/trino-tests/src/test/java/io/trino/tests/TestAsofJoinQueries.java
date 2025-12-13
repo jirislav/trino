@@ -13,10 +13,14 @@
  */
 package io.trino.tests;
 
+import io.trino.Session;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
 
+import static io.trino.SystemSessionProperties.ASOF_JOIN_STRATEGY;
 import static io.trino.SystemSessionProperties.JOIN_REORDERING_STRATEGY;
+import static io.trino.sql.planner.OptimizerConfig.AsofJoinStrategy.SORT_MERGE;
+import static io.trino.sql.planner.OptimizerConfig.AsofJoinStrategy.WINDOWING;
 import static io.trino.sql.planner.OptimizerConfig.JoinReorderingStrategy.NONE;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 
@@ -37,9 +41,14 @@ public class TestAsofJoinQueries
     }
 
     @org.junit.jupiter.api.Test
-    public void testRightLteLeft()
+    public void testRightLteLeftWithWindowingStrategy()
     {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
         assertQuery(
+                session,
                 """
                 WITH
                   left_t(k, ts, v) AS (
@@ -47,7 +56,7 @@ public class TestAsofJoinQueries
                       (1, DATE '1992-01-01', 10),
                       (1, DATE '1992-01-03', 20),
                       (2, DATE '1992-01-02', 30),
-                      (3, DATE '1992-01-01', 40)  -- no match case
+                      (3, DATE '1992-01-01', 40)
                   ),
                   right_t(k, ts, x) AS (
                     VALUES
@@ -69,9 +78,14 @@ public class TestAsofJoinQueries
     }
 
     @org.junit.jupiter.api.Test
-    public void testLeftGteRight()
+    public void testRightLteLeftWithSortMergeStrategy()
     {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
         assertQuery(
+                session,
                 """
                 WITH
                   left_t(k, ts, v) AS (
@@ -79,7 +93,7 @@ public class TestAsofJoinQueries
                       (1, DATE '1992-01-01', 10),
                       (1, DATE '1992-01-03', 20),
                       (2, DATE '1992-01-02', 30),
-                      (3, DATE '1992-01-01', 40)  -- no match case
+                      (3, DATE '1992-01-01', 40)
                   ),
                   right_t(k, ts, x) AS (
                     VALUES
@@ -89,7 +103,7 @@ public class TestAsofJoinQueries
                   )
                 SELECT l.k, l.ts, r.x
                 FROM left_t l ASOF JOIN right_t r
-                  ON l.k = r.k AND l.ts >= r.ts
+                  ON l.k = r.k AND r.ts <= l.ts
                 ORDER BY l.k, l.ts""",
                 """
                 VALUES
@@ -101,17 +115,302 @@ public class TestAsofJoinQueries
     }
 
     @org.junit.jupiter.api.Test
-    public void testRightLtLeft()
+    public void testCompositeEquiKeysWithWindowingStrategy()
     {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
         assertQuery(
+                session,
                 """
                 WITH
-                  left_t(k, ts, v) AS (
+                  left_t(k1, k2, ts, v) AS (
                     VALUES
-                      (1, DATE '1992-01-01', 10), -- no match case
-                      (1, DATE '1992-01-03', 20),
-                      (2, DATE '1992-01-02', 30),
-                      (3, DATE '1992-01-01', 40)  -- no match case
+                      (1, 'a', DATE '1992-01-01', 10),
+                      (1, 'a', DATE '1992-01-03', 20),
+                      (1, 'b', DATE '1992-01-02', 30),
+                      (2, 'a', DATE '1992-01-02', 40)
+                  ),
+                  right_t(k1, k2, ts, x) AS (
+                    VALUES
+                      (1, 'a', DATE '1992-01-01', 100),
+                      (1, 'a', DATE '1992-01-02', 200),
+                      (1, 'b', DATE '1992-01-01', 300),
+                      (2, 'a', DATE '1992-01-01', 400)
+                  )
+                SELECT l.k1, l.k2, l.ts, r.x
+                FROM left_t l ASOF JOIN right_t r
+                  ON l.k1 = r.k1 AND l.k2 = r.k2 AND r.ts <= l.ts
+                ORDER BY l.k1, l.k2, l.ts""",
+                """
+                VALUES
+                  (1, 'a', DATE '1992-01-01', 100),
+                  (1, 'a', DATE '1992-01-03', 200),
+                  (1, 'b', DATE '1992-01-02', 300),
+                  (2, 'a', DATE '1992-01-02', 400)
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testCompositeEquiKeysWithSortMergeStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k1, k2, ts, v) AS (
+                    VALUES
+                      (1, 'a', DATE '1992-01-01', 10),
+                      (1, 'a', DATE '1992-01-03', 20),
+                      (1, 'b', DATE '1992-01-02', 30),
+                      (2, 'a', DATE '1992-01-02', 40)
+                  ),
+                  right_t(k1, k2, ts, x) AS (
+                    VALUES
+                      (1, 'a', DATE '1992-01-01', 100),
+                      (1, 'a', DATE '1992-01-02', 200),
+                      (1, 'b', DATE '1992-01-01', 300),
+                      (2, 'a', DATE '1992-01-01', 400)
+                  )
+                SELECT l.k1, l.k2, l.ts, r.x
+                FROM left_t l ASOF JOIN right_t r
+                  ON l.k1 = r.k1 AND l.k2 = r.k2 AND r.ts <= l.ts
+                ORDER BY l.k1, l.k2, l.ts""",
+                """
+                VALUES
+                  (1, 'a', DATE '1992-01-01', 100),
+                  (1, 'a', DATE '1992-01-03', 200),
+                  (1, 'b', DATE '1992-01-02', 300),
+                  (2, 'a', DATE '1992-01-02', 400)
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testNoEquiConditionWithWindowingStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(ts, v) AS (
+                    VALUES
+                      (DATE '1992-01-02', 10),
+                      (DATE '1992-01-03', 20)
+                  ),
+                  right_t(ts, x) AS (
+                    VALUES
+                      (DATE '1992-01-01', 100),
+                      (DATE '1992-01-02', 200)
+                  )
+                SELECT l.ts, v, x
+                FROM left_t l ASOF JOIN right_t r ON r.ts <= l.ts
+                ORDER BY l.ts""",
+                """
+                VALUES
+                  (DATE '1992-01-02', 10, 200),
+                  (DATE '1992-01-03', 20, 200)
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testNoEquiConditionWithSortMergeStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(ts, v) AS (
+                    VALUES
+                      (DATE '1992-01-02', 10),
+                      (DATE '1992-01-03', 20)
+                  ),
+                  right_t(ts, x) AS (
+                    VALUES
+                      (DATE '1992-01-01', 100),
+                      (DATE '1992-01-02', 200)
+                  )
+                SELECT l.ts, v, x
+                FROM left_t l ASOF JOIN right_t r ON r.ts <= l.ts
+                ORDER BY l.ts""",
+                """
+                VALUES
+                  (DATE '1992-01-02', 10, 200),
+                  (DATE '1992-01-03', 20, 200)
+                """);
+    }
+
+    // Tests for R < L (strict less than)
+    @org.junit.jupiter.api.Test
+    public void testRightLtLeftWithWindowingStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k, ts) AS (
+                    VALUES
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-02')
+                  ),
+                  right_t(k, ts, x) AS (
+                    VALUES
+                      (1, DATE '1992-01-01', 100),
+                      (1, DATE '1992-01-02', 200),
+                      (2, DATE '1992-01-02', 300)
+                  )
+                SELECT l.k, l.ts, r.x
+                FROM left_t l ASOF JOIN right_t r
+                  ON l.k = r.k AND r.ts < l.ts
+                ORDER BY l.k, l.ts""",
+                """
+                VALUES
+                  (1, DATE '1992-01-02', 100),
+                  (1, DATE '1992-01-03', 200),
+                  (2, DATE '1992-01-02', CAST(NULL AS INTEGER))
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testRightLtLeftWithSortMergeStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k, ts) AS (
+                    VALUES
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-02')
+                  ),
+                  right_t(k, ts, x) AS (
+                    VALUES
+                      (1, DATE '1992-01-01', 100),
+                      (1, DATE '1992-01-02', 200),
+                      (2, DATE '1992-01-02', 300)
+                  )
+                SELECT l.k, l.ts, r.x
+                FROM left_t l ASOF JOIN right_t r
+                  ON l.k = r.k AND r.ts < l.ts
+                ORDER BY l.k, l.ts""",
+                """
+                VALUES
+                  (1, DATE '1992-01-02', 100),
+                  (1, DATE '1992-01-03', 200),
+                  (2, DATE '1992-01-02', CAST(NULL AS INTEGER))
+                """);
+    }
+
+    // Tests for L >= R (reversed, equivalent to R <= L)
+    @org.junit.jupiter.api.Test
+    public void testLeftGteRightWithWindowingStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k, ts) AS (
+                    VALUES
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-02')
+                  ),
+                  right_t(k, ts, x) AS (
+                    VALUES
+                      (1, DATE '1992-01-01', 100),
+                      (1, DATE '1992-01-02', 200),
+                      (2, DATE '1992-01-03', 300)
+                  )
+                SELECT l.k, l.ts, r.x
+                FROM left_t l ASOF JOIN right_t r
+                  ON l.k = r.k AND l.ts >= r.ts
+                ORDER BY l.k, l.ts""",
+                """
+                VALUES
+                  (1, DATE '1992-01-02', 200),
+                  (1, DATE '1992-01-03', 200),
+                  (2, DATE '1992-01-02', CAST(NULL AS INTEGER))
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testLeftGteRightWithSortMergeStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k, ts) AS (
+                    VALUES
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-02')
+                  ),
+                  right_t(k, ts, x) AS (
+                    VALUES
+                      (1, DATE '1992-01-01', 100),
+                      (1, DATE '1992-01-02', 200),
+                      (2, DATE '1992-01-03', 300)
+                  )
+                SELECT l.k, l.ts, r.x
+                FROM left_t l ASOF JOIN right_t r
+                  ON l.k = r.k AND l.ts >= r.ts
+                ORDER BY l.k, l.ts""",
+                """
+                VALUES
+                  (1, DATE '1992-01-02', 200),
+                  (1, DATE '1992-01-03', 200),
+                  (2, DATE '1992-01-02', CAST(NULL AS INTEGER))
+                """);
+    }
+
+    // Tests for L > R (reversed strict, equivalent to R < L)
+    @org.junit.jupiter.api.Test
+    public void testLeftGtRightWithWindowingStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k, ts) AS (
+                    VALUES
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-01')
                   ),
                   right_t(k, ts, x) AS (
                     VALUES
@@ -121,46 +420,179 @@ public class TestAsofJoinQueries
                   )
                 SELECT l.k, l.ts, r.x
                 FROM left_t l ASOF JOIN right_t r
-                  ON l.k = r.k AND r.ts < l.ts
+                  ON l.k = r.k AND l.ts > r.ts
                 ORDER BY l.k, l.ts""",
                 """
                 VALUES
-                  (1, DATE '1992-01-01', CAST(NULL AS INTEGER)),
+                  (1, DATE '1992-01-02', 100),
                   (1, DATE '1992-01-03', 200),
-                  (2, DATE '1992-01-02', 300),
-                  (3, DATE '1992-01-01', CAST(NULL AS INTEGER))
+                  (2, DATE '1992-01-01', CAST(NULL AS INTEGER))
                 """);
     }
 
     @org.junit.jupiter.api.Test
-    public void testCompositeEquiKeys()
+    public void testLeftGtRightWithSortMergeStrategy()
     {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
         assertQuery(
+                session,
                 """
                 WITH
-                  left_t(k1, k2, ts, v) AS (
+                  left_t(k, ts) AS (
                     VALUES
-                      (1, 10, DATE '1992-01-01', 10), -- no match case
-                      (1, 10, DATE '1992-01-03', 20),
-                      (2, 20, DATE '1992-01-02', 30),
-                      (3, 30, DATE '1992-01-01', 40)  -- no match case
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-01')
                   ),
-                  right_t(k1, k2, ts, x) AS (
+                  right_t(k, ts, x) AS (
                     VALUES
-                      (1, 10, DATE '1992-01-01', 100),
-                      (1, 10, DATE '1992-01-02', 200),
-                      (2, 20, DATE '1992-01-01', 300)
+                      (1, DATE '1992-01-01', 100),
+                      (1, DATE '1992-01-02', 200),
+                      (2, DATE '1992-01-01', 300)
                   )
-                SELECT l.k1, l.k2, l.ts, r.x
+                SELECT l.k, l.ts, r.x
                 FROM left_t l ASOF JOIN right_t r
-                  ON l.k1 = r.k1 AND l.k2 = r.k2 AND r.ts < l.ts
-                ORDER BY l.k1, l.k2, l.ts""",
+                  ON l.k = r.k AND l.ts > r.ts
+                ORDER BY l.k, l.ts""",
                 """
                 VALUES
-                  (1, 10, DATE '1992-01-01', CAST(NULL AS INTEGER)),
-                  (1, 10, DATE '1992-01-03', 200),
-                  (2, 20, DATE '1992-01-02', 300),
-                  (3, 30, DATE '1992-01-01', CAST(NULL AS INTEGER))
+                  (1, DATE '1992-01-02', 100),
+                  (1, DATE '1992-01-03', 200),
+                  (2, DATE '1992-01-01', CAST(NULL AS INTEGER))
                 """);
     }
+
+    @org.junit.jupiter.api.Test
+    public void testUsingNoEquiConditionWithWindowingStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(ts, v) AS (
+                    VALUES
+                      (DATE '1992-01-02', 10),
+                      (DATE '1992-01-03', 20)
+                  ),
+                  right_t(ts, x) AS (
+                    VALUES
+                      (DATE '1992-01-01', 100),
+                      (DATE '1992-01-02', 200)
+                  )
+                SELECT ts, v, x
+                FROM left_t ASOF JOIN right_t USING (ts)
+                ORDER BY ts""",
+                """
+                VALUES
+                  (DATE '1992-01-02', 10, 200),
+                  (DATE '1992-01-03', 20, 200)
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testUsingNoEquiConditionWithSortMergeStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(ts, v) AS (
+                    VALUES
+                      (DATE '1992-01-02', 10),
+                      (DATE '1992-01-03', 20)
+                  ),
+                  right_t(ts, x) AS (
+                    VALUES
+                      (DATE '1992-01-01', 100),
+                      (DATE '1992-01-02', 200)
+                  )
+                SELECT ts, v, x
+                FROM left_t ASOF JOIN right_t USING (ts)
+                ORDER BY ts""",
+                """
+                VALUES
+                  (DATE '1992-01-02', 10, 200),
+                  (DATE '1992-01-03', 20, 200)
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testUsingSingleEquiConditionWithWindowingStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, WINDOWING.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k, ts) AS (
+                    VALUES
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-01')
+                  ),
+                  right_t(k, ts, x) AS (
+                    VALUES
+                      (1, DATE '1992-01-01', 100),
+                      (1, DATE '1992-01-02', 200),
+                      (2, DATE '1992-01-01', 300)
+                  )
+                SELECT k, ts, v, x
+                FROM left_t ASOF JOIN right_t USING (k, ts)
+                ORDER BY ts""",
+                """
+                VALUES
+                  (1, DATE '1992-01-02', 200),
+                  (1, DATE '1992-01-03', 200),
+                  (2, DATE '1992-01-02', CAST(NULL AS INTEGER))
+                """);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testUsingSingleEquiConditionWithSOrtMergeStrategy()
+    {
+        Session session = Session.builder(getSession())
+                .setSystemProperty(ASOF_JOIN_STRATEGY, SORT_MERGE.name())
+                .build();
+
+        assertQuery(
+                session,
+                """
+                WITH
+                  left_t(k, ts) AS (
+                    VALUES
+                      (1, DATE '1992-01-02'),
+                      (1, DATE '1992-01-03'),
+                      (2, DATE '1992-01-01')
+                  ),
+                  right_t(k, ts, x) AS (
+                    VALUES
+                      (1, DATE '1992-01-01', 100),
+                      (1, DATE '1992-01-02', 200),
+                      (2, DATE '1992-01-01', 300)
+                  )
+                SELECT k, ts, v, x
+                FROM left_t ASOF JOIN right_t USING (k, ts)
+                ORDER BY ts""",
+                """
+                VALUES
+                  (1, DATE '1992-01-02', 200),
+                  (1, DATE '1992-01-03', 200),
+                  (2, DATE '1992-01-02', CAST(NULL AS INTEGER))
+                """);
+    }
+
 }

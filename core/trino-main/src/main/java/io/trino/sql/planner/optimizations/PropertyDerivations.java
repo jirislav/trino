@@ -69,6 +69,7 @@ import io.trino.sql.planner.plan.RowNumberNode;
 import io.trino.sql.planner.plan.SampleNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SimpleTableExecuteNode;
+import io.trino.sql.planner.plan.SortMergeAsofJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
 import io.trino.sql.planner.plan.StatisticsWriterNode;
@@ -611,6 +612,18 @@ public final class PropertyDerivations
                 case LEFT, ASOF -> ActualProperties.builderFrom(probeProperties.translate(column -> filterIfMissing(node.getOutputSymbols(), column)))
                         .build();
             };
+        }
+
+        @Override
+        public ActualProperties visitAsofJoin(SortMergeAsofJoinNode node, List<ActualProperties> inputProperties)
+        {
+            // ASOF join is similar to LEFT join - it preserves all probe (left) rows
+            // Build (right) side may contribute nulls when no match is found
+            ActualProperties probeProperties = inputProperties.get(0);
+
+            // Filter out symbols that are not in the output
+            return ActualProperties.builderFrom(probeProperties.translate(column -> filterIfMissing(node.getOutputSymbols(), column)))
+                    .build();
         }
 
         @Override

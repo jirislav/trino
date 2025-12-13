@@ -59,6 +59,7 @@ import io.trino.sql.planner.plan.RowNumberNode;
 import io.trino.sql.planner.plan.SampleNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SimpleTableExecuteNode;
+import io.trino.sql.planner.plan.SortMergeAsofJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
 import io.trino.sql.planner.plan.StatisticsWriterNode;
@@ -274,6 +275,18 @@ public final class StreamPropertyDerivations
             return switch (node.getType()) {
                 case INNER, LEFT, ASOF -> leftProperties.translate(column -> PropertyDerivations.filterIfMissing(node.getOutputSymbols(), column));
             };
+        }
+
+        @Override
+        public StreamProperties visitAsofJoin(SortMergeAsofJoinNode node, List<StreamProperties> inputProperties)
+        {
+            // ASOF join is similar to LEFT join - it preserves all probe (left) rows
+            // The operator may need to buffer data, so mark as unordered
+            StreamProperties leftProperties = inputProperties.get(0);
+
+            return leftProperties
+                    .translate(column -> PropertyDerivations.filterIfMissing(node.getOutputSymbols(), column))
+                    .unordered(true);
         }
 
         @Override

@@ -41,7 +41,6 @@ import io.trino.sql.planner.plan.WindowNode;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -84,11 +83,6 @@ public class RewriteAsofJoinToLeftJoinWithTop1
     @Override
     public Result apply(JoinNode node, Captures captures, Context context)
     {
-        // Validate equi-criteria
-        if (node.getCriteria().isEmpty()) {
-            throw new TrinoException(NOT_SUPPORTED, "ASOF join requires at least one equi-join criterion");
-        }
-
         // Extract and validate non-equi inequality predicate
         Comparison inequality = extractSupportedInequality(node)
                 .orElseThrow(() -> new TrinoException(NOT_SUPPORTED, "ASOF join requires a single supported inequality predicate"));
@@ -188,11 +182,11 @@ public class RewriteAsofJoinToLeftJoinWithTop1
                 .filter(Comparison.class::isInstance)
                 .map(Comparison.class::cast)
                 .filter(c -> c.operator() == LESS_THAN || c.operator() == LESS_THAN_OR_EQUAL || c.operator() == GREATER_THAN || c.operator() == GREATER_THAN_OR_EQUAL)
-                .collect(Collectors.toList());
+                .toList();
         if (comparisons.size() != 1) {
             return Optional.empty();
         }
-        return Optional.of(comparisons.get(0));
+        return Optional.of(comparisons.getFirst());
     }
 
     private RightOrderingColumns resolveOrderingColumns(JoinNode node, Comparison inequality)
@@ -225,7 +219,7 @@ public class RewriteAsofJoinToLeftJoinWithTop1
 
     private boolean referencesOnly(Expression expression, Set<Symbol> allowed)
     {
-        return io.trino.sql.planner.SymbolsExtractor.extractUnique(expression).stream().allMatch(allowed::contains);
+        return allowed.containsAll(io.trino.sql.planner.SymbolsExtractor.extractUnique(expression));
     }
 
     private Symbol symbolFromReference(Expression expression)

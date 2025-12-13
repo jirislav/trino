@@ -56,6 +56,7 @@ import static java.util.Objects.requireNonNull;
         @JsonSubTypes.Type(value = SampleNode.class, name = "sample"),
         @JsonSubTypes.Type(value = SemiJoinNode.class, name = "semiJoin"),
         @JsonSubTypes.Type(value = SimpleTableExecuteNode.class, name = "simpleTableExecuteNode"),
+        @JsonSubTypes.Type(value = SortMergeAsofJoinNode.class, name = "sortMergeAsofJoin"),
         @JsonSubTypes.Type(value = SortNode.class, name = "sort"),
         @JsonSubTypes.Type(value = SpatialJoinNode.class, name = "spatialJoin"),
         @JsonSubTypes.Type(value = StatisticsWriterNode.class, name = "statisticsWriterNode"),

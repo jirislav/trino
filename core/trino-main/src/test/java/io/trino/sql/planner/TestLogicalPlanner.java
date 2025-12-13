@@ -93,6 +93,7 @@ import java.util.function.Predicate;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.MoreCollectors.toOptional;
 import static io.airlift.slice.Slices.utf8Slice;
+import static io.trino.SystemSessionProperties.ASOF_JOIN_STRATEGY;
 import static io.trino.SystemSessionProperties.COST_ESTIMATION_WORKER_COUNT;
 import static io.trino.SystemSessionProperties.DISTINCT_AGGREGATIONS_STRATEGY;
 import static io.trino.SystemSessionProperties.DISTRIBUTED_SORT;
@@ -636,10 +637,14 @@ public class TestLogicalPlanner
     }
 
     @Test
-    public void testAsofJoinOptimizedPlan()
+    public void testAsofJoinOptimizedPlanWithWindowingStrategy()
     {
-        assertPlan(
+        assertPlanWithSession(
                 "SELECT o.orderkey, l.extendedprice FROM orders o ASOF JOIN lineitem l ON l.orderkey = o.orderkey AND l.shipdate <= o.orderdate",
+                Session.builder(getPlanTester().getDefaultSession())
+                        .setSystemProperty(ASOF_JOIN_STRATEGY, "WINDOWING")
+                        .build(),
+                false,
                 anyTree(
                         node(FilterNode.class,
                                 project(
@@ -657,9 +662,24 @@ public class TestLogicalPlanner
     }
 
     @Test
-    public void testAsofJoinUsingOptimizedPlan()
+    public void testAsofJoinOptimizedPlanWithSortMergeStrategy()
     {
-        assertPlan("""
+        assertPlanWithSession(
+                "SELECT o.orderkey, l.extendedprice FROM orders o ASOF JOIN lineitem l ON l.orderkey = o.orderkey AND l.shipdate <= o.orderdate",
+                Session.builder(getPlanTester().getDefaultSession())
+                        .setSystemProperty(ASOF_JOIN_STRATEGY, "SORT_MERGE")
+                        .build(),
+                false,
+                anyTree(
+                        node(io.trino.sql.planner.plan.SortMergeAsofJoinNode.class,
+                                anyTree(tableScan("orders")),
+                                anyTree(tableScan("lineitem")))));
+    }
+
+    @Test
+    public void testAsofJoinUsingOptimizedPlanWithWindowingStrategy()
+    {
+        assertPlanWithSession("""
                    WITH orders_norm AS (
                        SELECT orderkey, orderdate as date FROM orders
                    ), lineitem_norm AS (
@@ -667,6 +687,10 @@ public class TestLogicalPlanner
                    )
                    SELECT orderkey, extendedprice FROM orders_norm ASOF JOIN lineitem_norm USING (orderkey, date)
                    """,
+                Session.builder(getPlanTester().getDefaultSession())
+                        .setSystemProperty(ASOF_JOIN_STRATEGY, "WINDOWING")
+                        .build(),
+                false,
                 anyTree(
                         node(FilterNode.class,
                                 project(
@@ -687,6 +711,27 @@ public class TestLogicalPlanner
                                 )
                         )
                 ));
+    }
+
+    @Test
+    public void testAsofJoinUsingOptimizedPlanWithSortMergeStrategy()
+    {
+        assertPlanWithSession("""
+                              WITH orders_norm AS (
+                                  SELECT orderkey, orderdate as date FROM orders
+                              ), lineitem_norm AS (
+                                  SELECT orderkey, extendedprice, shipdate as date FROM lineitem
+                              )
+                              SELECT orderkey, extendedprice FROM orders_norm ASOF JOIN lineitem_norm USING (orderkey, date)
+                              """,
+                Session.builder(getPlanTester().getDefaultSession())
+                        .setSystemProperty(ASOF_JOIN_STRATEGY, "SORT_MERGE")
+                        .build(),
+                false,
+                anyTree(
+                        node(io.trino.sql.planner.plan.SortMergeAsofJoinNode.class,
+                                anyTree(tableScan("orders")),
+                                anyTree(tableScan("lineitem")))));
     }
 
     @Test

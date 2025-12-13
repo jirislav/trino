@@ -39,6 +39,7 @@ import io.trino.sql.planner.iterative.rule.AddIntermediateAggregations;
 import io.trino.sql.planner.iterative.rule.ApplyTableScanRedirection;
 import io.trino.sql.planner.iterative.rule.ArraySortAfterArrayDistinct;
 import io.trino.sql.planner.iterative.rule.CanonicalizeExpressions;
+import io.trino.sql.planner.iterative.rule.ChooseAsofJoinStrategy;
 import io.trino.sql.planner.iterative.rule.CreatePartialTopN;
 import io.trino.sql.planner.iterative.rule.DecorrelateInnerUnnestWithGlobalAggregation;
 import io.trino.sql.planner.iterative.rule.DecorrelateLeftUnnestWithGlobalAggregation;
@@ -220,7 +221,6 @@ import io.trino.sql.planner.iterative.rule.ReplaceJoinOverConstantWithProject;
 import io.trino.sql.planner.iterative.rule.ReplaceRedundantJoinWithProject;
 import io.trino.sql.planner.iterative.rule.ReplaceRedundantJoinWithSource;
 import io.trino.sql.planner.iterative.rule.ReplaceWindowWithRowNumber;
-import io.trino.sql.planner.iterative.rule.RewriteAsofJoinToLeftJoinWithTop1;
 import io.trino.sql.planner.iterative.rule.RewriteExcludeColumnsFunctionToProjection;
 import io.trino.sql.planner.iterative.rule.RewriteSpatialPartitioningAggregation;
 import io.trino.sql.planner.iterative.rule.RewriteTableFunctionToTableScan;
@@ -855,7 +855,7 @@ public class PlanOptimizers
                         // new join nodes without JoinNode.maySkipOutputDuplicates flag set
                         new OptimizeDuplicateInsensitiveJoins())));
 
-        // Rewrite ASOF join semantics into LEFT join with window row_number + filter (Top-1 per left row)
+        // Choose ASOF join strategy based on cost (windowing vs sort-merge)
         // Run this before exchanges so that the physical planning operates on the rewritten plan
         builder.add(new IterativeOptimizer(
                 plannerContext,
@@ -863,7 +863,7 @@ public class PlanOptimizers
                 statsCalculator,
                 costCalculator,
                 ImmutableSet.of(
-                        new RewriteAsofJoinToLeftJoinWithTop1(plannerContext))));
+                        new ChooseAsofJoinStrategy(plannerContext))));
 
         // Previous invocations of PushPredicateIntoTableScan do not prune using predicate expression. The invocation in AddExchanges
         // does this pruning - and we may end up with empty union branches after that. We invoke PushPredicateIntoTableScan
